@@ -4,8 +4,12 @@ RustyWolf is a minimal, privacy-focused browser shell built with Rust + WebKit.
 - macOS: native `WKWebView`
 - Linux: `WebKitGTK`
 
+<img width="2912" height="1900" alt="image" src="https://github.com/user-attachments/assets/90d3880e-bb3e-44f5-8307-bc96011e24c8" />
+
+
 # What It Does
 
+- Really, I mean really lightweight! the reason I even made this is because I need a lightweight browser to run on my old macbook unibody 2010 4gb ddr3
 - Privacy-first defaults: DuckDuckGo home + search fallback from the URL bar
 - Multi-tab browsing with back, forward, reload, and keyboard shortcuts (`Ctrl/Cmd+T`, `W`, `L`)
 - Built-in custom adblock with top-bar toggle (`ADS`)
