@@ -20,7 +20,7 @@ RustyWolf is a minimal, privacy-focused browser shell built with Rust + WebKit.
 - Optional `--private` mode when backend support is available
 - Automatically clears all cookies and search history on exit
 
-# Linux Setup
+# Linux Setup (prerequisites)
 
 Install WebKitGTK development/runtime packages before building.
 
@@ -48,6 +48,22 @@ source "$HOME/.cargo/env"
 ```bash
 doas emerge --sync
 doas emerge --ask net-libs/webkit-gtk x11-libs/gtk+ virtual/pkgconfig dev-vcs/git
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+source "$HOME/.cargo/env"
+```
+
+# MacOS
+
+## installing Homebrew (skip if already installed)
+
+```bash
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+```
+
+## Setup (prerequisites)
+
+```bash
+brew install webkitgtk gtk+3 pkgconf git
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 source "$HOME/.cargo/env"
 ```
