@@ -1,11 +1,8 @@
 # RustyWolf
 
 RustyWolf is a minimal, privacy-focused browser shell built with Rust + WebKit.
-
 - macOS: native `WKWebView`
 - Linux: `WebKitGTK`
-
-No Firefox install. No extension system. Fast startup, clean UI.
 
 ## What It Does
 
@@ -17,6 +14,42 @@ No Firefox install. No extension system. Fast startup, clean UI.
 - Properties page with session browsing history + download history
 - Default window size `1000x600` (still fully resizable)
 - Optional `--private` mode when backend support is available
+- Automatically clears all cookies and search history on exit
+
+## Linux Setup
+
+Install WebKitGTK development/runtime packages before building.
+
+# Debian
+
+```bash
+sudo apt update
+sudo apt install -y libwebkit2gtk-4.1-dev libgtk-3-dev build-essential pkg-config git
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+source "$HOME/.cargo/env"
+```
+# Arch
+
+```bash
+sudo pacman -Sy
+sudo pacman -S --needed webkit2gtk-4.1 gtk3 base-devel pkgconf git
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+source "$HOME/.cargo/env"
+```
+
+## clone the code onto your device
+
+```bash
+git clone https://github.com/dvorakmortonxd/RustyWolf.git
+```
+
+## Dev Quick Checks
+
+```bash
+cargo fmt
+cargo check
+cargo test
+```
 
 ## Run
 
@@ -35,26 +68,7 @@ cargo run -- --dry-run
 ## Privacy Notes
 
 RustyWolf applies baseline hardening in page context:
-
 - `navigator.doNotTrack = "1"`
 - disables legacy `openDatabase`
 - disables `RTCPeerConnection`
-
-Adblocking is built-in and lightweight. It is not full uBlock Origin parity.
-
-## Linux Setup
-
-Install WebKitGTK development/runtime packages before building.
-
-```bash
-sudo apt update
-sudo apt install -y libwebkit2gtk-4.1-dev libgtk-3-dev build-essential pkg-config
-```
-
-## Dev Quick Checks
-
-```bash
-cargo fmt
-cargo check
-cargo test
-```
+Adblocking is built-in and lightweight. It is not full uBlock Origin parity. But it even blocks YouTube videos, like, they literally vanish when you toggle it on while watching lol..
