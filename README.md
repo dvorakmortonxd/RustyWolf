@@ -32,11 +32,22 @@ sudo apt install -y libwebkit2gtk-4.1-dev libgtk-3-dev build-essential pkg-confi
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 source "$HOME/.cargo/env"
 ```
+
 ## Arch
 
 ```bash
 sudo pacman -Sy
 sudo pacman -S --needed webkit2gtk-4.1 gtk3 base-devel pkgconf git
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+source "$HOME/.cargo/env"
+```
+
+## Gentoo
+
+(u can replace doas with sudo btw)
+```bash
+doas emerge --sync
+doas emerge --ask net-libs/webkit-gtk x11-libs/gtk+ virtual/pkgconfig dev-vcs/git
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 source "$HOME/.cargo/env"
 ```
