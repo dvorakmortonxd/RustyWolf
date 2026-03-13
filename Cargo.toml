@@ -1,0 +1,21 @@
+[package]
+name = "RustyWolf"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0"
+base64 = "0.22"
+clap = { version = "4.5", features = ["derive"] }
+serde_json = "1.0"
+tao = "0.31"
+ureq = "2.12"
+url = "2.5"
+wry = { version = "0.47", features = ["fullscreen"] }
+image = { version = "0.25", default-features = false, features = ["bmp", "ico", "png"] }
+
+[package.metadata.bundle]
+name = "RustyWolf"
+identifier = "com.rustywolf.browser"
+icon = ["src/rustywolf.icns"]
+
