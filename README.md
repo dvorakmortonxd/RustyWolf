@@ -1,10 +1,10 @@
-# RustyWolf
+# About RustyWolf
 
 RustyWolf is a minimal, privacy-focused browser shell built with Rust + WebKit.
 - macOS: native `WKWebView`
 - Linux: `WebKitGTK`
 
-## What It Does
+# What It Does
 
 - Privacy-first defaults: DuckDuckGo home + search fallback from the URL bar
 - Multi-tab browsing with back, forward, reload, and keyboard shortcuts (`Ctrl/Cmd+T`, `W`, `L`)
@@ -16,11 +16,11 @@ RustyWolf is a minimal, privacy-focused browser shell built with Rust + WebKit.
 - Optional `--private` mode when backend support is available
 - Automatically clears all cookies and search history on exit
 
-## Linux Setup
+# Linux Setup
 
 Install WebKitGTK development/runtime packages before building.
 
-# Debian
+## Debian
 
 ```bash
 sudo apt update
@@ -28,7 +28,7 @@ sudo apt install -y libwebkit2gtk-4.1-dev libgtk-3-dev build-essential pkg-confi
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 source "$HOME/.cargo/env"
 ```
-# Arch
+## Arch
 
 ```bash
 sudo pacman -Sy
@@ -37,13 +37,13 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 source "$HOME/.cargo/env"
 ```
 
-## clone the code onto your device
+# clone the code onto your device
 
 ```bash
 git clone https://github.com/dvorakmortonxd/RustyWolf.git
 ```
 
-## Dev Quick Checks
+# Dev Quick Checks
 
 ```bash
 cargo fmt
@@ -51,11 +51,15 @@ cargo check
 cargo test
 ```
 
-## Run
+# Run
+
+## simple launch
 
 ```bash
 cargo run --
 ```
+
+## advanced options
 
 ```bash
 cargo run -- --url https://example.com
@@ -65,10 +69,14 @@ cargo run -- --private
 cargo run -- --dry-run
 ```
 
-## Privacy Notes
+# Privacy Notes
 
 RustyWolf applies baseline hardening in page context:
 - `navigator.doNotTrack = "1"`
 - disables legacy `openDatabase`
 - disables `RTCPeerConnection`
-Adblocking is built-in and lightweight. It is not full uBlock Origin parity. But it even blocks YouTube videos, like, they literally vanish when you toggle it on while watching lol..
+
+## btw
+Adblocking is built-in and lightweight. It is not full uBlock Origin parity. But it even blocks YouTube videos, like, they literally vanish when you toggle it on while watching lol, the browser will even ask you when the website wants to redirect you somewhere so you dont get spammed by multiple tabs. 
+
+# Enjoy!
