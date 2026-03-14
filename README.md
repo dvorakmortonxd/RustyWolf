@@ -90,6 +90,13 @@ cargo test
 cargo run --
 ```
 
+if you're noticing problems (like me on my gentoo machine, black window)
+try
+```bash
+WEBKIT_DISABLE_COMPOSITING_MODE=1 cargo run --
+```
+(this will make it a bit slower but alteast it will work)
+
 ## advanced options
 
 ```bash
