@@ -86,7 +86,9 @@ source "$HOME/.cargo/env"
 
 # Linux Troubleshooting (Wayland/X11)
 
-RustyWolf supports both X11 and Wayland, but some NVIDIA + WebKitGTK stacks can fail with dmabuf/gbm allocation errors.
+RustyWolf supports both X11 and native Wayland on Linux.
+
+Some NVIDIA + WebKitGTK stacks can fail with dmabuf/gbm allocation errors, especially on Wayland.
 
 Try these launch modes:
 
@@ -94,8 +96,9 @@ Try these launch modes:
 # safest fallback on many NVIDIA setups
 cargo run -- --linux-backend x11 --linux-disable-dmabuf
 
-# native wayland with dmabuf disabled
-cargo run -- --linux-backend wayland --linux-disable-dmabuf
+# native wayland
+cargo run -- --linux-backend wayland
+
 
 # auto backend, dmabuf disabled only
 cargo run -- --linux-disable-dmabuf

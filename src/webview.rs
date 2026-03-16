@@ -47,6 +47,7 @@ struct Tab {
 
 struct BrowserState {
     chrome: WebView,
+    host_mode: WebViewHostMode,
     tabs: Vec<Tab>,
     history: Vec<HistoryEntry>,
     downloads: Vec<DownloadEntry>,
@@ -78,6 +79,13 @@ struct DownloadEntry {
     downloaded_bytes: u64,
     total_bytes: Option<u64>,
     updated_at: String,
+}
+
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum WebViewHostMode {
+    Child,
+    Window,
 }
 
 impl BrowserState {
@@ -572,6 +580,7 @@ const ADBLOCK_JS: &str = r#"
 
 pub fn launch_webkit(args: &Cli) -> Result<()> {
     apply_linux_runtime_overrides(args);
+    let host_mode = resolve_webview_host_mode(args);
 
     let start_url = args
         .url
@@ -598,10 +607,11 @@ pub fn launch_webkit(args: &Cli) -> Result<()> {
         .build(&event_loop)
         .map_err(|err| anyhow!("Failed to create window: {err}"))?;
 
-    let chrome = build_chrome(&window, &proxy)?;
+    let chrome = build_chrome(&window, &proxy, host_mode)?;
 
     let mut state = BrowserState {
         chrome,
+        host_mode,
         tabs: Vec::new(),
         history: Vec::new(),
         downloads: Vec::new(),
@@ -659,7 +669,6 @@ fn apply_linux_runtime_overrides(_args: &Cli) {
         match _args.linux_backend {
             crate::cli::LinuxBackend::Auto => {}
             crate::cli::LinuxBackend::X11 => {
-                // Force X11/XWayland for compositor or driver combinations that break native Wayland.
                 unsafe {
                     std::env::set_var("WINIT_UNIX_BACKEND", "x11");
                     std::env::set_var("GDK_BACKEND", "x11");
@@ -679,6 +688,39 @@ fn apply_linux_runtime_overrides(_args: &Cli) {
                 std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
             }
         }
+    }
+}
+
+fn resolve_webview_host_mode(args: &Cli) -> WebViewHostMode {
+    #[cfg(target_os = "linux")]
+    {
+        return match args.linux_backend {
+            crate::cli::LinuxBackend::X11 => WebViewHostMode::Child,
+            crate::cli::LinuxBackend::Wayland => WebViewHostMode::Window,
+            crate::cli::LinuxBackend::Auto => {
+                let forced = std::env::var("WINIT_UNIX_BACKEND").ok();
+                if forced.as_deref() == Some("x11") {
+                    return WebViewHostMode::Child;
+                }
+                if forced.as_deref() == Some("wayland") {
+                    return WebViewHostMode::Window;
+                }
+
+                let session_type = std::env::var("XDG_SESSION_TYPE").unwrap_or_default();
+                let has_wayland_display = std::env::var_os("WAYLAND_DISPLAY").is_some();
+                if session_type.eq_ignore_ascii_case("wayland") || has_wayland_display {
+                    WebViewHostMode::Window
+                } else {
+                    WebViewHostMode::Child
+                }
+            }
+        };
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = args;
+        WebViewHostMode::Child
     }
 }
 
@@ -942,17 +984,25 @@ fn handle_chrome_ipc(
 
 // ---------- Webview builders -------------------------------------------
 
-fn build_chrome(window: &Window, proxy: &EventLoopProxy<UserEvent>) -> Result<WebView> {
+fn build_chrome(
+    window: &Window,
+    proxy: &EventLoopProxy<UserEvent>,
+    host_mode: WebViewHostMode,
+) -> Result<WebView> {
     let (lw, _lh) = logical_size(window);
     let chrome_proxy = proxy.clone();
-    WebViewBuilder::new()
+    let builder = WebViewBuilder::new()
         .with_html(CHROME_HTML)
         .with_bounds(chrome_bounds(lw, CHROME_HEIGHT_BASE))
         .with_ipc_handler(move |req| {
             let _ = chrome_proxy.send_event(UserEvent::ChromeIpc(req.body().to_string()));
-        })
-        .build_as_child(window)
-        .map_err(|err| anyhow!("Failed to create chrome webview: {err}"))
+        });
+
+    let webview = match host_mode {
+        WebViewHostMode::Child => builder.build_as_child(window),
+        WebViewHostMode::Window => builder.build(window),
+    };
+    webview.map_err(|err| anyhow!("Failed to create chrome webview: {err}"))
 }
 
 fn open_tab(
@@ -973,7 +1023,7 @@ fn open_tab(
     let new_window_proxy = proxy.clone();
     let init_script = format!("{PRIVACY_JS}\n{ADBLOCK_JS}");
 
-    let webview = WebViewBuilder::new()
+    let builder = WebViewBuilder::new()
         .with_url(&url)
         .with_incognito(state.private)
         .with_initialization_script(&init_script)
@@ -1010,9 +1060,13 @@ fn open_tab(
                 file_path: path.map(|p| path_to_string(&p)),
                 success,
             });
-        })
-        .build_as_child(window)
-        .map_err(|err| anyhow!("Failed to create tab webview: {err}"))?;
+        });
+
+    let webview = match state.host_mode {
+        WebViewHostMode::Child => builder.build_as_child(window),
+        WebViewHostMode::Window => builder.build(window),
+    }
+    .map_err(|err| anyhow!("Failed to create tab webview: {err}"))?;
 
     state.tabs.push(Tab { id: tab_id, title: "New Tab".into(), url, webview });
     state.active = state.tabs.len() - 1;
