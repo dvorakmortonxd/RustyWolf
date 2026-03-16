@@ -10,6 +10,9 @@ No Firefox install. No extension system. Fast startup, clean UI.
 
 ## What It Does
 
+- Really, I mean really lightweight! the reason I even made this is because I need a lightweight browser to run on my old macbook unibody 2010 4gb ddr3
+    - So light in fact in my gentoo(openrc)+i3wm setup it took only 285mb ram with one tab open (dvorakmortonxd.dev) compared to firefox which took 866mb ram
+    - THATS 3.04 TIMES AS MUCH RAM, so yeah it is light
 - Privacy-first defaults: DuckDuckGo home + search fallback from the URL bar
 - Multi-tab browsing with back, forward, reload, and keyboard shortcuts (`Ctrl/Cmd+T`, `W`, `L`)
 - Built-in custom adblock with top-bar toggle (`ADS`)
@@ -49,16 +52,39 @@ RustyWolf applies baseline hardening in page context:
 
 Adblocking is built-in and lightweight. It is not full uBlock Origin parity.
 
-## Linux Setup
+# Linux Setup (prerequisites)
 
 Install WebKitGTK development/runtime packages before building.
 
+## Debian
+
 ```bash
 sudo apt update
-sudo apt install -y libwebkit2gtk-4.1-dev libgtk-3-dev build-essential pkg-config
+sudo apt install -y libwebkit2gtk-4.1-dev libgtk-3-dev build-essential pkg-config git
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+source "$HOME/.cargo/env"
 ```
 
-### Linux Troubleshooting (Wayland/X11)
+## Arch
+
+```bash
+sudo pacman -Sy
+sudo pacman -S --needed webkit2gtk-4.1 gtk3 base-devel pkgconf git
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+source "$HOME/.cargo/env"
+```
+
+## Gentoo
+
+(u can replace doas with sudo btw)
+```bash
+doas emerge --sync
+doas emerge --ask net-libs/webkit-gtk:4.1 x11-libs/gtk+ virtual/pkgconfig dev-vcs/git
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+source "$HOME/.cargo/env"
+```
+
+# Linux Troubleshooting (Wayland/X11)
 
 RustyWolf supports both X11 and Wayland, but some NVIDIA + WebKitGTK stacks can fail with dmabuf/gbm allocation errors.
 
@@ -75,7 +101,15 @@ cargo run -- --linux-backend wayland --linux-disable-dmabuf
 cargo run -- --linux-disable-dmabuf
 ```
 
-## Windows Setup
+# MacOS
+
+## installing Homebrew (skip if already installed)
+
+```bash
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+```
+
+# Windows Setup
 
 Install the Microsoft Edge WebView2 Runtime (Evergreen), then build normally with Rust MSVC toolchain.
 
