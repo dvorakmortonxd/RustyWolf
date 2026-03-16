@@ -4,7 +4,7 @@ use base64::Engine;
 use serde_json::json;
 use std::collections::HashSet;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::thread;
 use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -571,6 +571,8 @@ const ADBLOCK_JS: &str = r#"
 // ---------- Entry point ------------------------------------------------
 
 pub fn launch_webkit(args: &Cli) -> Result<()> {
+    apply_linux_runtime_overrides(args);
+
     let start_url = args
         .url
         .as_deref()
@@ -579,7 +581,10 @@ pub fn launch_webkit(args: &Cli) -> Result<()> {
     let title = args.title.clone().unwrap_or_else(|| "RustyWolf".to_string());
 
     if args.dry_run {
-        println!("engine=webkit url={start_url} private={}", args.private);
+        println!(
+            "engine=webkit url={start_url} private={} linux_backend={:?} linux_disable_dmabuf={}",
+            args.private, args.linux_backend, args.linux_disable_dmabuf
+        );
         return Ok(());
     }
 
@@ -588,7 +593,7 @@ pub fn launch_webkit(args: &Cli) -> Result<()> {
 
     let window = WindowBuilder::new()
         .with_title(title)
-        .with_window_icon(Some(load_window_icon()?))
+        .with_window_icon(load_window_icon())
         .with_inner_size(LogicalSize::new(1000.0_f64, 600.0_f64))
         .build(&event_loop)
         .map_err(|err| anyhow!("Failed to create window: {err}"))?;
@@ -646,6 +651,35 @@ pub fn launch_webkit(args: &Cli) -> Result<()> {
             _ => {}
         }
     });
+}
+
+fn apply_linux_runtime_overrides(_args: &Cli) {
+    #[cfg(target_os = "linux")]
+    {
+        match _args.linux_backend {
+            crate::cli::LinuxBackend::Auto => {}
+            crate::cli::LinuxBackend::X11 => {
+                // Force X11/XWayland for compositor or driver combinations that break native Wayland.
+                unsafe {
+                    std::env::set_var("WINIT_UNIX_BACKEND", "x11");
+                    std::env::set_var("GDK_BACKEND", "x11");
+                }
+            }
+            crate::cli::LinuxBackend::Wayland => {
+                unsafe {
+                    std::env::set_var("WINIT_UNIX_BACKEND", "wayland");
+                    std::env::set_var("GDK_BACKEND", "wayland");
+                }
+            }
+        }
+
+        if _args.linux_disable_dmabuf {
+            // WebKitGTK + NVIDIA can fail with dmabuf/gbm allocation on some systems.
+            unsafe {
+                std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+            }
+        }
+    }
 }
 
 // ---------- Event handling ---------------------------------------------
@@ -1126,13 +1160,15 @@ fn reflow_layout(window: &Window, state: &BrowserState) {
     }
 }
 
-fn load_window_icon() -> Result<Icon> {
-    let image = image::load_from_memory_with_format(include_bytes!("rustywolf.ico"), image::ImageFormat::Ico)
-        .map_err(|err| anyhow!("Failed to decode app icon src/rustywolf.ico: {err}"))?
-        .into_rgba8();
+fn load_window_icon() -> Option<Icon> {
+    let image = image::load_from_memory_with_format(
+        include_bytes!("rustywolf.ico"),
+        image::ImageFormat::Ico,
+    )
+    .ok()?
+    .into_rgba8();
     let (width, height) = image.dimensions();
-    Icon::from_rgba(image.into_raw(), width, height)
-        .map_err(|err| anyhow!("Failed to create window icon: {err}"))
+    Icon::from_rgba(image.into_raw(), width, height).ok()
 }
 
 fn chrome_height(state: &BrowserState) -> f64 {
@@ -1222,11 +1258,12 @@ fn render_properties_html(state: &BrowserState) -> String {
             .iter()
             .rev()
             .map(|entry| {
+                let file_url = path_string_to_file_url(&entry.file_path);
                 format!(
-                    "<tr><td>{}</td><td>{}</td><td><a href=\"file://{}\">{}</a></td><td>{}</td></tr>",
+                    "<tr><td>{}</td><td>{}</td><td><a href=\"{}\">{}</a></td><td>{}</td></tr>",
                     escape_html(&entry.updated_at),
                     escape_html(&entry.status),
-                    escape_html(&entry.file_path),
+                    escape_html(&file_url),
                     escape_html(&entry.file_path),
                     escape_html(&entry.url),
                 )
@@ -1277,12 +1314,10 @@ fn trim_downloads(state: &mut BrowserState) {
 }
 
 fn default_download_path_for(url: &str) -> PathBuf {
-    let mut dir = std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .filter(|p| p.is_absolute())
+    let mut dir = dirs::download_dir()
+        .or_else(dirs::home_dir)
         .or_else(|| std::env::current_dir().ok())
-        .unwrap_or_else(|| PathBuf::from("/tmp"));
-    dir.push("Downloads");
+        .unwrap_or_else(std::env::temp_dir);
     dir.push(filename_from_url(url));
     dir
 }
@@ -1323,7 +1358,7 @@ fn ensure_unique_download_path(path: PathBuf) -> PathBuf {
 }
 
 fn filename_from_url(url: &str) -> String {
-    url::Url::parse(url)
+    let raw = url::Url::parse(url)
         .ok()
         .and_then(|u| {
             u.path_segments().and_then(|mut parts| {
@@ -1334,7 +1369,9 @@ fn filename_from_url(url: &str) -> String {
                     .map(ToString::to_string)
             })
         })
-        .unwrap_or_else(|| "download.bin".to_string())
+        .unwrap_or_else(|| "download.bin".to_string());
+
+    sanitize_filename(&raw)
 }
 
 fn path_to_string(path: &PathBuf) -> String {
@@ -1359,6 +1396,27 @@ fn escape_html(input: &str) -> String {
 
 fn is_internal_page(url: &str) -> bool {
     url.starts_with("data:text/html;base64,")
+}
+
+fn path_string_to_file_url(path: &str) -> String {
+    url::Url::from_file_path(Path::new(path))
+        .map(|u| u.to_string())
+        .unwrap_or_else(|_| format!("file://{path}"))
+}
+
+fn sanitize_filename(raw: &str) -> String {
+    let mut out = String::with_capacity(raw.len());
+    for ch in raw.chars() {
+        let invalid = matches!(ch, '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*')
+            || ch.is_control();
+        out.push(if invalid { '_' } else { ch });
+    }
+    let trimmed = out.trim_matches('.').trim();
+    if trimmed.is_empty() {
+        "download.bin".to_string()
+    } else {
+        trimmed.to_string()
+    }
 }
 
 fn fetch_download_total(url: String, file_path: String, proxy: EventLoopProxy<UserEvent>) {
@@ -1387,7 +1445,7 @@ fn looks_like_address(value: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{normalize_url, should_open_new_tab_url};
+    use super::{normalize_url, sanitize_filename, should_open_new_tab_url};
 
     #[test]
     fn keeps_existing_scheme() {
@@ -1436,5 +1494,15 @@ mod tests {
     fn allows_regular_https_new_tab_targets() {
         assert!(should_open_new_tab_url("https://example.com/"));
         assert!(should_open_new_tab_url("https://duckduckgo.com/?q=rust"));
+    }
+
+    #[test]
+    fn sanitizes_windows_unsafe_filename_chars() {
+        assert_eq!(sanitize_filename("report:2026?.pdf"), "report_2026_.pdf");
+    }
+
+    #[test]
+    fn falls_back_when_filename_becomes_empty() {
+        assert_eq!(sanitize_filename("..."), "download.bin");
     }
 }

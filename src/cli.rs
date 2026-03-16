@@ -1,4 +1,11 @@
-use clap::Parser;
+use clap::{Parser, ValueEnum};
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub enum LinuxBackend {
+    Auto,
+    X11,
+    Wayland,
+}
 
 #[derive(Debug, Parser)]
 #[command(
@@ -19,6 +26,20 @@ pub struct Cli {
 
     #[arg(long, help = "Print launch settings without opening a window")]
     pub dry_run: bool,
+
+    #[arg(
+        long,
+        value_enum,
+        default_value_t = LinuxBackend::Auto,
+        help = "Linux only: prefer a windowing backend (auto, x11, wayland)"
+    )]
+    pub linux_backend: LinuxBackend,
+
+    #[arg(
+        long,
+        help = "Linux only: disable WebKit dmabuf renderer (helps some NVIDIA/Wayland setups)"
+    )]
+    pub linux_disable_dmabuf: bool,
 }
 
 impl Cli {
