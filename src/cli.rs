@@ -1,3 +1,4 @@
+//cli.rs
 use clap::{Parser, ValueEnum};
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
