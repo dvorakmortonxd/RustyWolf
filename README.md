@@ -15,6 +15,7 @@ No Firefox install. No extension system. Fast startup, clean UI.
 - Really, I mean really lightweight! the reason I even made this is because I need a lightweight browser to run on my old macbook unibody 2010 4gb ddr3
     - So light in fact in my gentoo(openrc)+i3wm setup it took only 285mb ram with one tab open (dvorakmortonxd.dev) compared to firefox which took 866mb ram
     - THATS 3.04 TIMES AS MUCH RAM, so yeah it is light
+    - tabs have a toggle for Keeping-In-Ram (`K`), it basically just saves the url if its off and reloads it on reclick, if you toggle it on it keeps the whole page in ram.
 - Privacy-first defaults: DuckDuckGo home + search fallback from the URL bar
 - Multi-tab browsing with back, forward, reload, and keyboard shortcuts (`Ctrl/Cmd+T`, `W`, `L`)
 - Built-in custom adblock with top-bar toggle (`ADS`)
@@ -37,7 +38,7 @@ cargo run -- --title "RustyWolf"
 cargo run -- --private
 cargo run -- --dry-run
 
-# Linux backend controls
+# Linux backend controls (wayland has issues currently, x11 recommended)
 cargo run -- --linux-backend x11
 cargo run -- --linux-backend wayland
 cargo run -- --linux-disable-dmabuf
