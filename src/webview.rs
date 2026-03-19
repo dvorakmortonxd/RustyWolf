@@ -60,9 +60,9 @@ struct BrowserState {
     chrome: WebView,
     host_mode: WebViewHostMode,
     #[cfg(target_os = "linux")]
-    gtk_chrome_container: gtk::Fixed,
+    gtk_chrome_container: gtk::Box,
     #[cfg(target_os = "linux")]
-    gtk_content_container: gtk::Fixed,
+    gtk_content_container: gtk::Box,
     tabs: Vec<Tab>,
     history: Vec<HistoryEntry>,
     downloads: Vec<DownloadEntry>,
@@ -1131,7 +1131,7 @@ fn build_chrome(
     window: &Window,
     proxy: &EventLoopProxy<UserEvent>,
     host_mode: WebViewHostMode,
-    #[cfg(target_os = "linux")] gtk_chrome_container: &gtk::Fixed,
+    #[cfg(target_os = "linux")] gtk_chrome_container: &gtk::Box,
 ) -> Result<(WebView, WebViewHostMode)> {
     let chrome_rect = chrome_bounds(window, CHROME_HEIGHT_BASE, host_mode);
     let builder = || {
@@ -1233,7 +1233,7 @@ fn build_tab_webview(
     window: &Window,
     proxy: &EventLoopProxy<UserEvent>,
     host_mode: WebViewHostMode,
-    #[cfg(target_os = "linux")] gtk_content_container: &gtk::Fixed,
+    #[cfg(target_os = "linux")] gtk_content_container: &gtk::Box,
     private: bool,
     tab_id: u32,
     url: &str,
@@ -1584,19 +1584,6 @@ fn logical_size(window: &Window) -> (f64, f64) {
 }
 
 fn chrome_bounds(window: &Window, chrome_h: f64, _host_mode: WebViewHostMode) -> Rect {
-    #[cfg(target_os = "linux")]
-    {
-        if _host_mode == WebViewHostMode::Window {
-            let scale = window.scale_factor();
-            let size = window.inner_size();
-            let chrome_px = (chrome_h * scale).round().max(0.0) as u32;
-            return Rect {
-                position: wry::dpi::PhysicalPosition::new(0, 0).into(),
-                size: wry::dpi::Size::Physical(wry::dpi::PhysicalSize::new(size.width, chrome_px)),
-            };
-        }
-    }
-
     let (logical_w, _logical_h) = logical_size(window);
     Rect {
         position: wry::dpi::LogicalPosition::new(0.0, 0.0).into(),
@@ -1608,14 +1595,14 @@ fn content_bounds(window: &Window, chrome_h: f64, _host_mode: WebViewHostMode) -
     #[cfg(target_os = "linux")]
     {
         if _host_mode == WebViewHostMode::Window {
-            let scale = window.scale_factor();
-            let size = window.inner_size();
-            let chrome_px = (chrome_h * scale).round().max(0.0) as u32;
-            let content_h = size.height.saturating_sub(chrome_px);
+            let (logical_w, logical_h) = logical_size(window);
             return Rect {
                 // Content webviews are inside a dedicated GTK content container.
-                position: wry::dpi::PhysicalPosition::new(0, 0).into(),
-                size: wry::dpi::Size::Physical(wry::dpi::PhysicalSize::new(size.width, content_h)),
+                position: wry::dpi::LogicalPosition::new(0.0, 0.0).into(),
+                size: wry::dpi::Size::Logical(wry::dpi::LogicalSize::new(
+                    logical_w,
+                    (logical_h - chrome_h).max(0.0),
+                )),
             };
         }
     }
@@ -1633,7 +1620,13 @@ fn content_bounds(window: &Window, chrome_h: f64, _host_mode: WebViewHostMode) -
 fn reflow_layout(window: &Window, state: &BrowserState) {
     let chrome_h = chrome_height(state);
     #[cfg(target_os = "linux")]
-    set_linux_chrome_container_height(&state.gtk_chrome_container, chrome_h);
+    {
+        set_linux_chrome_container_height(&state.gtk_chrome_container, chrome_h);
+        if state.host_mode == WebViewHostMode::Window {
+            // GTK container layout controls bounds in window-host mode.
+            return;
+        }
+    }
     let _ = state
         .chrome
         .set_bounds(chrome_bounds(window, chrome_h, state.host_mode));
@@ -1646,16 +1639,16 @@ fn reflow_layout(window: &Window, state: &BrowserState) {
 }
 
 #[cfg(target_os = "linux")]
-fn create_linux_webview_containers(window: &Window) -> Result<(gtk::Fixed, gtk::Fixed)> {
+fn create_linux_webview_containers(window: &Window) -> Result<(gtk::Box, gtk::Box)> {
     let vbox = window.default_vbox().ok_or_else(|| {
         anyhow!("Failed to access default GTK vbox required for Linux webview hosting")
     })?;
 
-    let chrome = gtk::Fixed::new();
+    let chrome = gtk::Box::new(gtk::Orientation::Vertical, 0);
     chrome.set_hexpand(true);
     chrome.set_vexpand(false);
 
-    let content = gtk::Fixed::new();
+    let content = gtk::Box::new(gtk::Orientation::Vertical, 0);
     content.set_hexpand(true);
     content.set_vexpand(true);
 
@@ -1670,7 +1663,7 @@ fn create_linux_webview_containers(window: &Window) -> Result<(gtk::Fixed, gtk::
 }
 
 #[cfg(target_os = "linux")]
-fn set_linux_chrome_container_height(container: &gtk::Fixed, chrome_h: f64) {
+fn set_linux_chrome_container_height(container: &gtk::Box, chrome_h: f64) {
     container.set_size_request(-1, chrome_h.max(0.0).round() as i32);
 }
 
