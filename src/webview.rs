@@ -691,7 +691,7 @@ const ADBLOCK_JS: &str = r#"
 
 pub fn launch_webkit(args: &Cli) -> Result<()> {
     apply_linux_runtime_overrides(args);
-    let host_mode = resolve_webview_host_mode(args);
+    let mut host_mode = resolve_webview_host_mode(args);
 
     let start_url = args
         .url
@@ -718,7 +718,8 @@ pub fn launch_webkit(args: &Cli) -> Result<()> {
         .build(&event_loop)
         .map_err(|err| anyhow!("Failed to create window: {err}"))?;
 
-    let chrome = build_chrome(&window, &proxy, host_mode)?;
+    let (chrome, effective_host_mode) = build_chrome(&window, &proxy, host_mode)?;
+    host_mode = effective_host_mode;
 
     let mut state = BrowserState {
         chrome,
@@ -1105,21 +1106,59 @@ fn build_chrome(
     window: &Window,
     proxy: &EventLoopProxy<UserEvent>,
     host_mode: WebViewHostMode,
-) -> Result<WebView> {
+) -> Result<(WebView, WebViewHostMode)> {
     let (lw, _lh) = logical_size(window);
-    let chrome_proxy = proxy.clone();
-    let builder = WebViewBuilder::new()
-        .with_html(CHROME_HTML)
-        .with_bounds(chrome_bounds(lw, CHROME_HEIGHT_BASE))
-        .with_ipc_handler(move |req| {
-            let _ = chrome_proxy.send_event(UserEvent::ChromeIpc(req.body().to_string()));
-        });
-
-    let webview = match host_mode {
-        WebViewHostMode::Child => builder.build_as_child(window),
-        WebViewHostMode::Window => builder.build(window),
+    let builder = || {
+        let chrome_proxy = proxy.clone();
+        WebViewBuilder::new()
+            .with_html(CHROME_HTML)
+            .with_bounds(chrome_bounds(lw, CHROME_HEIGHT_BASE))
+            .with_ipc_handler(move |req| {
+                let _ = chrome_proxy.send_event(UserEvent::ChromeIpc(req.body().to_string()));
+            })
     };
-    webview.map_err(|err| anyhow!("Failed to create chrome webview: {err}"))
+
+    match host_mode {
+        WebViewHostMode::Window => builder()
+            .build(window)
+            .map(|webview| (webview, WebViewHostMode::Window))
+            .map_err(|err| anyhow!("Failed to create chrome webview: {err}")),
+        WebViewHostMode::Child => match builder().build_as_child(window) {
+            Ok(webview) => Ok((webview, WebViewHostMode::Child)),
+            Err(err) => {
+                let err_text = err.to_string();
+                if is_child_webview_unsupported_error(&err_text) {
+                    eprintln!(
+                        "child chrome webview unsupported on this backend; falling back to window-hosted chrome"
+                    );
+                    return builder()
+                        .build(window)
+                        .map(|webview| (webview, WebViewHostMode::Window))
+                        .map_err(|fallback_err| {
+                            anyhow!(
+                                "Failed to create chrome webview: child failed ({err_text}); window fallback failed ({fallback_err})"
+                            )
+                        });
+                }
+                Err(anyhow!("Failed to create chrome webview: {err_text}"))
+            }
+        },
+    }
+}
+
+fn is_child_webview_unsupported_error(err_text: &str) -> bool {
+    #[cfg(target_os = "linux")]
+    {
+        let lower = err_text.to_ascii_lowercase();
+        lower.contains("window handle kind is not supported")
+            || (lower.contains("child") && lower.contains("not supported"))
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = err_text;
+        false
+    }
 }
 
 fn build_tab_webview(
