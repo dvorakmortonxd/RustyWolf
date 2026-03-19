@@ -65,7 +65,7 @@ Install WebKitGTK development/runtime packages before building.
 
 ```bash
 sudo apt update
-sudo apt install -y libwebkit2gtk-4.1-dev libgtk-3-dev build-essential pkg-config git
+sudo apt install -y libwebkit2gtk-4.1-dev libgtk-3-dev build-essential pkg-config git appmenu-gtk3-module appmenu-gtk2-module
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 source "$HOME/.cargo/env"
 ```
@@ -74,7 +74,7 @@ source "$HOME/.cargo/env"
 
 ```bash
 sudo pacman -Sy
-sudo pacman -S --needed webkit2gtk-4.1 gtk3 base-devel pkgconf git
+sudo pacman -S --needed webkit2gtk-4.1 gtk3 base-devel pkgconf git appmenu-gtk-module
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 source "$HOME/.cargo/env"
 ```
@@ -84,7 +84,7 @@ source "$HOME/.cargo/env"
 (u can replace doas with sudo btw)
 ```bash
 doas emerge --sync
-doas emerge --ask net-libs/webkit-gtk:4.1 x11-libs/gtk+ virtual/pkgconfig dev-vcs/git
+doas emerge --ask net-libs/webkit-gtk:4.1 x11-libs/gtk+ virtual/pkgconfig dev-vcs/git x11-misc/appmenu-gtk-module
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 source "$HOME/.cargo/env"
 ```
@@ -129,6 +129,23 @@ cargo run -- --linux-backend wayland
 
 # auto backend, dmabuf disabled only
 cargo run -- --linux-disable-dmabuf
+```
+
+If you still see `Failed to load module "appmenu-gtk-module"`, that is a desktop GTK setup issue (not a RustyWolf crash).
+
+Debian/Ubuntu/Pop!_OS fix:
+
+```bash
+sudo apt update
+sudo apt install -y appmenu-gtk3-module appmenu-gtk2-module
+```
+
+If you do not want global appmenu integration, remove `appmenu-gtk-module` from GTK settings files:
+
+```bash
+~/.config/gtk-3.0/settings.ini
+/etc/gtk-3.0/settings.ini
+/etc/xdg/gtk-3.0/settings.ini
 ```
 
 # MacOS

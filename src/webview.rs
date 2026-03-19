@@ -24,7 +24,7 @@ use wry::{PageLoadEvent, Rect, WebView, WebViewBuilder};
 const DEFAULT_HOME: &str = "https://duckduckgo.com";
 const NEW_TAB_URL: &str = "https://duckduckgo.com";
 const SEARCH_URL_PREFIX: &str = "https://duckduckgo.com/?q=";
-const MODERN_BROWSER_UA: &str = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36";
+const MODERN_BROWSER_UA_BASE: &str = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36";
 const CHROME_HEIGHT_BASE: f64 = 84.0;
 const CHROME_HEIGHT_DOWNLOADS_EXTRA: f64 = 104.0;
 const CHROME_HEIGHT_POPUP_PROMPT_EXTRA: f64 = 44.0;
@@ -1311,6 +1311,7 @@ fn build_tab_webview(
     bounds: Rect,
 ) -> Result<(WebView, WebViewHostMode)> {
     let init_script = format!("{PRIVACY_JS}\n{ADBLOCK_JS}");
+    let user_agent = browser_user_agent();
 
     let builder = || {
         let title_proxy = proxy.clone();
@@ -1322,7 +1323,7 @@ fn build_tab_webview(
 
         WebViewBuilder::new()
             .with_url(url)
-            .with_user_agent(MODERN_BROWSER_UA)
+            .with_user_agent(&user_agent)
             .with_incognito(private)
             .with_initialization_script(&init_script)
             .with_bounds(bounds)
@@ -1445,6 +1446,11 @@ fn build_tab_webview(
             }
         },
     }
+}
+
+fn browser_user_agent() -> String {
+    // Keep a modern compatibility UA while clearly identifying this browser.
+    format!("{MODERN_BROWSER_UA_BASE} RustyWolf/{}", env!("CARGO_PKG_VERSION"))
 }
 
 fn open_tab(
