@@ -800,6 +800,8 @@ pub fn launch_webkit(args: &Cli) -> Result<()> {
 fn apply_linux_runtime_overrides(_args: &Cli) {
     #[cfg(target_os = "linux")]
     {
+        sanitize_gtk_modules_env();
+
         match _args.linux_backend {
             crate::cli::LinuxBackend::Auto => {}
             crate::cli::LinuxBackend::X11 => {
@@ -821,6 +823,38 @@ fn apply_linux_runtime_overrides(_args: &Cli) {
             unsafe {
                 std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
             }
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn sanitize_gtk_modules_env() {
+    let Ok(raw) = std::env::var("GTK_MODULES") else {
+        return;
+    };
+
+    let mut kept = Vec::new();
+    for token in raw.split(':') {
+        let trimmed = token.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if trimmed == "appmenu-gtk-module" || trimmed == "appmenu-gtk-module.so" {
+            continue;
+        }
+        kept.push(trimmed.to_string());
+    }
+
+    let next = kept.join(":");
+    if next == raw {
+        return;
+    }
+
+    unsafe {
+        if next.is_empty() {
+            std::env::remove_var("GTK_MODULES");
+        } else {
+            std::env::set_var("GTK_MODULES", next);
         }
     }
 }

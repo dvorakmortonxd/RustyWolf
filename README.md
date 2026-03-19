@@ -89,6 +89,28 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 source "$HOME/.cargo/env"
 ```
 
+## Linux media playback deps (important)
+
+If Linux logs `gstreamer element autoaudiosink not found` or YouTube/audio fails, install GStreamer audio/video plugins.
+
+Debian/Ubuntu/Pop!_OS example:
+
+```bash
+sudo apt update
+sudo apt install -y gstreamer1.0-tools
+sudo apt install -y gstreamer1.0-plugins-base gstreamer1.0-plugins-good
+sudo apt install -y gstreamer1.0-plugins-bad gstreamer1.0-libav
+sudo apt install -y gstreamer1.0-pulseaudio gstreamer1.0-pipewire gstreamer1.0-alsa
+```
+
+Verify the sink exists:
+
+```bash
+gst-inspect-1.0 autoaudiosink
+```
+
+If your distro is not Debian-based, install the equivalent GStreamer base/good/bad/libav + audio sink plugin packages.
+
 # Linux Troubleshooting (Wayland/X11)
 
 RustyWolf supports both X11 and native Wayland on Linux.
