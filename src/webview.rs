@@ -1169,59 +1169,83 @@ fn build_tab_webview(
     tab_id: u32,
     url: &str,
     bounds: Rect,
-) -> Result<WebView> {
-    let title_proxy = proxy.clone();
-    let page_proxy = proxy.clone();
-    let download_started_proxy = proxy.clone();
-    let download_completed_proxy = proxy.clone();
-    let download_total_proxy = proxy.clone();
-    let new_window_proxy = proxy.clone();
+) -> Result<(WebView, WebViewHostMode)> {
     let init_script = format!("{PRIVACY_JS}\n{ADBLOCK_JS}");
 
-    let builder = WebViewBuilder::new()
-        .with_url(url)
-        .with_incognito(private)
-        .with_initialization_script(&init_script)
-        .with_bounds(bounds)
-        .with_new_window_req_handler(move |target| {
-            let _ = new_window_proxy.send_event(UserEvent::OpenInNewTab { url: target });
-            false
-        })
-        .with_document_title_changed_handler(move |title| {
-            let _ = title_proxy.send_event(UserEvent::TitleChanged { tab_id, title });
-        })
-        .with_on_page_load_handler(move |event, url| {
-            if matches!(event, PageLoadEvent::Finished) {
-                let _ = page_proxy.send_event(UserEvent::PageLoaded { tab_id, url });
-            }
-        })
-        .with_download_started_handler(move |url, destination| {
-            let path = ensure_unique_download_path(default_download_path_for(&url));
-            if let Some(parent) = path.parent() {
-                let _ = std::fs::create_dir_all(parent);
-            }
-            *destination = path.clone();
-            let path_string = path_to_string(&path);
-            fetch_download_total(url.clone(), path_string.clone(), download_total_proxy.clone());
-            let _ = download_started_proxy.send_event(UserEvent::DownloadStarted {
-                url,
-                file_path: path_string,
-            });
-            true
-        })
-        .with_download_completed_handler(move |url, path, success| {
-            let _ = download_completed_proxy.send_event(UserEvent::DownloadCompleted {
-                url,
-                file_path: path.map(|p| path_to_string(&p)),
-                success,
-            });
-        });
+    let builder = || {
+        let title_proxy = proxy.clone();
+        let page_proxy = proxy.clone();
+        let download_started_proxy = proxy.clone();
+        let download_completed_proxy = proxy.clone();
+        let download_total_proxy = proxy.clone();
+        let new_window_proxy = proxy.clone();
+
+        WebViewBuilder::new()
+            .with_url(url)
+            .with_incognito(private)
+            .with_initialization_script(&init_script)
+            .with_bounds(bounds)
+            .with_new_window_req_handler(move |target| {
+                let _ = new_window_proxy.send_event(UserEvent::OpenInNewTab { url: target });
+                false
+            })
+            .with_document_title_changed_handler(move |title| {
+                let _ = title_proxy.send_event(UserEvent::TitleChanged { tab_id, title });
+            })
+            .with_on_page_load_handler(move |event, url| {
+                if matches!(event, PageLoadEvent::Finished) {
+                    let _ = page_proxy.send_event(UserEvent::PageLoaded { tab_id, url });
+                }
+            })
+            .with_download_started_handler(move |url, destination| {
+                let path = ensure_unique_download_path(default_download_path_for(&url));
+                if let Some(parent) = path.parent() {
+                    let _ = std::fs::create_dir_all(parent);
+                }
+                *destination = path.clone();
+                let path_string = path_to_string(&path);
+                fetch_download_total(url.clone(), path_string.clone(), download_total_proxy.clone());
+                let _ = download_started_proxy.send_event(UserEvent::DownloadStarted {
+                    url,
+                    file_path: path_string,
+                });
+                true
+            })
+            .with_download_completed_handler(move |url, path, success| {
+                let _ = download_completed_proxy.send_event(UserEvent::DownloadCompleted {
+                    url,
+                    file_path: path.map(|p| path_to_string(&p)),
+                    success,
+                });
+            })
+    };
 
     match host_mode {
-        WebViewHostMode::Child => builder.build_as_child(window),
-        WebViewHostMode::Window => builder.build(window),
+        WebViewHostMode::Window => builder()
+            .build(window)
+            .map(|webview| (webview, WebViewHostMode::Window))
+            .map_err(|err| anyhow!("Failed to create tab webview: {err}")),
+        WebViewHostMode::Child => match builder().build_as_child(window) {
+            Ok(webview) => Ok((webview, WebViewHostMode::Child)),
+            Err(err) => {
+                let err_text = err.to_string();
+                if is_child_webview_unsupported_error(&err_text) {
+                    eprintln!(
+                        "child tab webview unsupported on this backend; falling back to window-hosted tabs"
+                    );
+                    return builder()
+                        .build(window)
+                        .map(|webview| (webview, WebViewHostMode::Window))
+                        .map_err(|fallback_err| {
+                            anyhow!(
+                                "Failed to create tab webview: child failed ({err_text}); window fallback failed ({fallback_err})"
+                            )
+                        });
+                }
+                Err(anyhow!("Failed to create tab webview: {err_text}"))
+            }
+        },
     }
-    .map_err(|err| anyhow!("Failed to create tab webview: {err}"))
 }
 
 fn open_tab(
@@ -1233,7 +1257,7 @@ fn open_tab(
     let tab_id = state.alloc_id();
     let (lw, lh) = logical_size(window);
     let chrome_h = chrome_height(state);
-    let webview = build_tab_webview(
+    let (webview, effective_host_mode) = build_tab_webview(
         window,
         proxy,
         state.host_mode,
@@ -1242,6 +1266,7 @@ fn open_tab(
         &url,
         content_bounds(lw, lh, chrome_h),
     )?;
+    state.host_mode = effective_host_mode;
 
     state.tabs.push(Tab {
         id: tab_id,
@@ -1323,7 +1348,7 @@ fn ensure_tab_loaded(
     let chrome_h = chrome_height(state);
     let tab_id = state.tabs[index].id;
     let tab_url = state.tabs[index].url.clone();
-    let webview = build_tab_webview(
+    let (webview, effective_host_mode) = build_tab_webview(
         window,
         proxy,
         state.host_mode,
@@ -1332,6 +1357,7 @@ fn ensure_tab_loaded(
         &tab_url,
         content_bounds(lw, lh, chrome_h),
     )?;
+    state.host_mode = effective_host_mode;
     state.tabs[index].webview = Some(webview);
     Ok(())
 }
