@@ -9,10 +9,16 @@ use std::path::{Path, PathBuf};
 use std::thread;
 use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
+#[cfg(target_os = "linux")]
+use gtk::prelude::*;
+#[cfg(target_os = "linux")]
+use tao::platform::unix::WindowExtUnix;
 use tao::dpi::LogicalSize;
 use tao::event::{Event, WindowEvent};
 use tao::event_loop::{ControlFlow, EventLoop, EventLoopBuilder, EventLoopProxy};
 use tao::window::{Icon, Window, WindowBuilder};
+#[cfg(target_os = "linux")]
+use wry::WebViewBuilderExtUnix;
 use wry::{PageLoadEvent, Rect, WebView, WebViewBuilder};
 
 const DEFAULT_HOME: &str = "https://duckduckgo.com";
@@ -53,6 +59,8 @@ struct Tab {
 struct BrowserState {
     chrome: WebView,
     host_mode: WebViewHostMode,
+    #[cfg(target_os = "linux")]
+    gtk_container: gtk::Fixed,
     tabs: Vec<Tab>,
     history: Vec<HistoryEntry>,
     downloads: Vec<DownloadEntry>,
@@ -718,12 +726,23 @@ pub fn launch_webkit(args: &Cli) -> Result<()> {
         .build(&event_loop)
         .map_err(|err| anyhow!("Failed to create window: {err}"))?;
 
-    let (chrome, effective_host_mode) = build_chrome(&window, &proxy, host_mode)?;
+    #[cfg(target_os = "linux")]
+    let gtk_container = create_linux_webview_container(&window)?;
+
+    let (chrome, effective_host_mode) = build_chrome(
+        &window,
+        &proxy,
+        host_mode,
+        #[cfg(target_os = "linux")]
+        &gtk_container,
+    )?;
     host_mode = effective_host_mode;
 
     let mut state = BrowserState {
         chrome,
         host_mode,
+        #[cfg(target_os = "linux")]
+        gtk_container,
         tabs: Vec::new(),
         history: Vec::new(),
         downloads: Vec::new(),
@@ -1106,6 +1125,7 @@ fn build_chrome(
     window: &Window,
     proxy: &EventLoopProxy<UserEvent>,
     host_mode: WebViewHostMode,
+    #[cfg(target_os = "linux")] gtk_container: &gtk::Fixed,
 ) -> Result<(WebView, WebViewHostMode)> {
     let (lw, _lh) = logical_size(window);
     let builder = || {
@@ -1119,10 +1139,32 @@ fn build_chrome(
     };
 
     match host_mode {
-        WebViewHostMode::Window => builder()
-            .build(window)
-            .map(|webview| (webview, WebViewHostMode::Window))
-            .map_err(|err| anyhow!("Failed to create chrome webview: {err}")),
+        WebViewHostMode::Window => {
+            #[cfg(target_os = "linux")]
+            {
+                match builder().build_gtk(gtk_container) {
+                    Ok(webview) => return Ok((webview, WebViewHostMode::Window)),
+                    Err(gtk_err) => {
+                        return builder()
+                            .build(window)
+                            .map(|webview| (webview, WebViewHostMode::Window))
+                            .map_err(|fallback_err| {
+                                anyhow!(
+                                    "Failed to create chrome webview: gtk hosting failed ({gtk_err}); window fallback failed ({fallback_err})"
+                                )
+                            });
+                    }
+                }
+            }
+
+            #[cfg(not(target_os = "linux"))]
+            {
+                builder()
+                    .build(window)
+                    .map(|webview| (webview, WebViewHostMode::Window))
+                    .map_err(|err| anyhow!("Failed to create chrome webview: {err}"))
+            }
+        }
         WebViewHostMode::Child => match builder().build_as_child(window) {
             Ok(webview) => Ok((webview, WebViewHostMode::Child)),
             Err(err) => {
@@ -1131,14 +1173,34 @@ fn build_chrome(
                     eprintln!(
                         "child chrome webview unsupported on this backend; falling back to window-hosted chrome"
                     );
-                    return builder()
-                        .build(window)
-                        .map(|webview| (webview, WebViewHostMode::Window))
-                        .map_err(|fallback_err| {
-                            anyhow!(
-                                "Failed to create chrome webview: child failed ({err_text}); window fallback failed ({fallback_err})"
-                            )
-                        });
+                    #[cfg(target_os = "linux")]
+                    {
+                        match builder().build_gtk(gtk_container) {
+                            Ok(webview) => return Ok((webview, WebViewHostMode::Window)),
+                            Err(gtk_err) => {
+                                return builder()
+                                    .build(window)
+                                    .map(|webview| (webview, WebViewHostMode::Window))
+                                    .map_err(|fallback_err| {
+                                        anyhow!(
+                                            "Failed to create chrome webview: child failed ({err_text}); gtk fallback failed ({gtk_err}); window fallback failed ({fallback_err})"
+                                        )
+                                    });
+                            }
+                        }
+                    }
+
+                    #[cfg(not(target_os = "linux"))]
+                    {
+                        return builder()
+                            .build(window)
+                            .map(|webview| (webview, WebViewHostMode::Window))
+                            .map_err(|fallback_err| {
+                                anyhow!(
+                                    "Failed to create chrome webview: child failed ({err_text}); window fallback failed ({fallback_err})"
+                                )
+                            });
+                    }
                 }
                 Err(anyhow!("Failed to create chrome webview: {err_text}"))
             }
@@ -1165,6 +1227,7 @@ fn build_tab_webview(
     window: &Window,
     proxy: &EventLoopProxy<UserEvent>,
     host_mode: WebViewHostMode,
+    #[cfg(target_os = "linux")] gtk_container: &gtk::Fixed,
     private: bool,
     tab_id: u32,
     url: &str,
@@ -1221,10 +1284,32 @@ fn build_tab_webview(
     };
 
     match host_mode {
-        WebViewHostMode::Window => builder()
-            .build(window)
-            .map(|webview| (webview, WebViewHostMode::Window))
-            .map_err(|err| anyhow!("Failed to create tab webview: {err}")),
+        WebViewHostMode::Window => {
+            #[cfg(target_os = "linux")]
+            {
+                match builder().build_gtk(gtk_container) {
+                    Ok(webview) => return Ok((webview, WebViewHostMode::Window)),
+                    Err(gtk_err) => {
+                        return builder()
+                            .build(window)
+                            .map(|webview| (webview, WebViewHostMode::Window))
+                            .map_err(|fallback_err| {
+                                anyhow!(
+                                    "Failed to create tab webview: gtk hosting failed ({gtk_err}); window fallback failed ({fallback_err})"
+                                )
+                            });
+                    }
+                }
+            }
+
+            #[cfg(not(target_os = "linux"))]
+            {
+                builder()
+                    .build(window)
+                    .map(|webview| (webview, WebViewHostMode::Window))
+                    .map_err(|err| anyhow!("Failed to create tab webview: {err}"))
+            }
+        }
         WebViewHostMode::Child => match builder().build_as_child(window) {
             Ok(webview) => Ok((webview, WebViewHostMode::Child)),
             Err(err) => {
@@ -1233,14 +1318,34 @@ fn build_tab_webview(
                     eprintln!(
                         "child tab webview unsupported on this backend; falling back to window-hosted tabs"
                     );
-                    return builder()
-                        .build(window)
-                        .map(|webview| (webview, WebViewHostMode::Window))
-                        .map_err(|fallback_err| {
-                            anyhow!(
-                                "Failed to create tab webview: child failed ({err_text}); window fallback failed ({fallback_err})"
-                            )
-                        });
+                    #[cfg(target_os = "linux")]
+                    {
+                        match builder().build_gtk(gtk_container) {
+                            Ok(webview) => return Ok((webview, WebViewHostMode::Window)),
+                            Err(gtk_err) => {
+                                return builder()
+                                    .build(window)
+                                    .map(|webview| (webview, WebViewHostMode::Window))
+                                    .map_err(|fallback_err| {
+                                        anyhow!(
+                                            "Failed to create tab webview: child failed ({err_text}); gtk fallback failed ({gtk_err}); window fallback failed ({fallback_err})"
+                                        )
+                                    });
+                            }
+                        }
+                    }
+
+                    #[cfg(not(target_os = "linux"))]
+                    {
+                        return builder()
+                            .build(window)
+                            .map(|webview| (webview, WebViewHostMode::Window))
+                            .map_err(|fallback_err| {
+                                anyhow!(
+                                    "Failed to create tab webview: child failed ({err_text}); window fallback failed ({fallback_err})"
+                                )
+                            });
+                    }
                 }
                 Err(anyhow!("Failed to create tab webview: {err_text}"))
             }
@@ -1261,6 +1366,8 @@ fn open_tab(
         window,
         proxy,
         state.host_mode,
+        #[cfg(target_os = "linux")]
+        &state.gtk_container,
         state.private,
         tab_id,
         &url,
@@ -1352,6 +1459,8 @@ fn ensure_tab_loaded(
         window,
         proxy,
         state.host_mode,
+        #[cfg(target_os = "linux")]
+        &state.gtk_container,
         state.private,
         tab_id,
         &tab_url,
@@ -1495,6 +1604,19 @@ fn reflow_layout(window: &Window, state: &BrowserState) {
             let _ = webview.set_bounds(cb);
         }
     }
+}
+
+#[cfg(target_os = "linux")]
+fn create_linux_webview_container(window: &Window) -> Result<gtk::Fixed> {
+    let vbox = window.default_vbox().ok_or_else(|| {
+        anyhow!("Failed to access default GTK vbox required for Linux webview hosting")
+    })?;
+    let fixed = gtk::Fixed::new();
+    fixed.set_hexpand(true);
+    fixed.set_vexpand(true);
+    vbox.pack_start(&fixed, true, true, 0);
+    fixed.show_all();
+    Ok(fixed)
 }
 
 fn load_window_icon() -> Option<Icon> {

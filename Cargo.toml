@@ -16,6 +16,9 @@ wry = { version = "0.47", features = ["fullscreen"] }
 image = { version = "0.25", default-features = false, features = ["bmp", "ico", "png"] }
 dirs = "6.0"
 
+[target.'cfg(target_os = "linux")'.dependencies]
+gtk = "0.18"
+
 [package.metadata.bundle]
 name = "RustyWolf"
 identifier = "com.rustywolf.browser"

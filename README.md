@@ -2,6 +2,8 @@
 
 RustyWolf is a minimal, privacy-focused browser shell built with Rust + system webviews.
 
+(complete honesty, this whole thing is vibecoded, however I never paid for any ai service (I got a free student plan for a year) so if you wanna avoid AI slop, just skip this but I never contributed to the AI BOOM with my money, if you wanna contribute, feel free to do so)
+
 - macOS: native `WKWebView`
 - Linux: `WebKitGTK`
 - Windows: `WebView2`
