@@ -1133,12 +1133,12 @@ fn build_chrome(
     host_mode: WebViewHostMode,
     #[cfg(target_os = "linux")] gtk_chrome_container: &gtk::Fixed,
 ) -> Result<(WebView, WebViewHostMode)> {
-    let (lw, _lh) = logical_size(window);
+    let chrome_rect = chrome_bounds(window, CHROME_HEIGHT_BASE, host_mode);
     let builder = || {
         let chrome_proxy = proxy.clone();
         WebViewBuilder::new()
             .with_html(CHROME_HTML)
-            .with_bounds(chrome_bounds(lw, CHROME_HEIGHT_BASE))
+            .with_bounds(chrome_rect)
             .with_ipc_handler(move |req| {
                 let _ = chrome_proxy.send_event(UserEvent::ChromeIpc(req.body().to_string()));
             })
@@ -1366,8 +1366,8 @@ fn open_tab(
     url: String,
 ) -> Result<()> {
     let tab_id = state.alloc_id();
-    let (lw, lh) = logical_size(window);
     let chrome_h = chrome_height(state);
+    let tab_bounds = content_bounds(window, chrome_h, state.host_mode);
     let (webview, effective_host_mode) = build_tab_webview(
         window,
         proxy,
@@ -1377,7 +1377,7 @@ fn open_tab(
         state.private,
         tab_id,
         &url,
-        content_bounds(lw, lh, chrome_h),
+        tab_bounds,
     )?;
     state.host_mode = effective_host_mode;
 
@@ -1457,8 +1457,8 @@ fn ensure_tab_loaded(
     if index >= state.tabs.len() || state.tabs[index].webview.is_some() {
         return Ok(());
     }
-    let (lw, lh) = logical_size(window);
     let chrome_h = chrome_height(state);
+    let tab_bounds = content_bounds(window, chrome_h, state.host_mode);
     let tab_id = state.tabs[index].id;
     let tab_url = state.tabs[index].url.clone();
     let (webview, effective_host_mode) = build_tab_webview(
@@ -1470,7 +1470,7 @@ fn ensure_tab_loaded(
         state.private,
         tab_id,
         &tab_url,
-        content_bounds(lw, lh, chrome_h),
+        tab_bounds,
     )?;
     state.host_mode = effective_host_mode;
     state.tabs[index].webview = Some(webview);
@@ -1583,27 +1583,44 @@ fn logical_size(window: &Window) -> (f64, f64) {
     (phys.width as f64 / scale, phys.height as f64 / scale)
 }
 
-fn chrome_bounds(logical_w: f64, chrome_h: f64) -> Rect {
+fn chrome_bounds(window: &Window, chrome_h: f64, _host_mode: WebViewHostMode) -> Rect {
+    #[cfg(target_os = "linux")]
+    {
+        if _host_mode == WebViewHostMode::Window {
+            let scale = window.scale_factor();
+            let size = window.inner_size();
+            let chrome_px = (chrome_h * scale).round().max(0.0) as u32;
+            return Rect {
+                position: wry::dpi::PhysicalPosition::new(0, 0).into(),
+                size: wry::dpi::Size::Physical(wry::dpi::PhysicalSize::new(size.width, chrome_px)),
+            };
+        }
+    }
+
+    let (logical_w, _logical_h) = logical_size(window);
     Rect {
         position: wry::dpi::LogicalPosition::new(0.0, 0.0).into(),
         size: wry::dpi::Size::Logical(wry::dpi::LogicalSize::new(logical_w, chrome_h)),
     }
 }
 
-fn content_bounds(logical_w: f64, logical_h: f64, chrome_h: f64) -> Rect {
+fn content_bounds(window: &Window, chrome_h: f64, _host_mode: WebViewHostMode) -> Rect {
     #[cfg(target_os = "linux")]
     {
-        return Rect {
-            position: wry::dpi::LogicalPosition::new(0.0, 0.0).into(),
-            size: wry::dpi::Size::Logical(wry::dpi::LogicalSize::new(
-                logical_w,
-                (logical_h - chrome_h).max(0.0),
-            )),
-        };
+        if _host_mode == WebViewHostMode::Window {
+            let scale = window.scale_factor();
+            let size = window.inner_size();
+            let chrome_px = (chrome_h * scale).round().max(0.0) as u32;
+            let content_h = size.height.saturating_sub(chrome_px);
+            return Rect {
+                // Content webviews are inside a dedicated GTK content container.
+                position: wry::dpi::PhysicalPosition::new(0, 0).into(),
+                size: wry::dpi::Size::Physical(wry::dpi::PhysicalSize::new(size.width, content_h)),
+            };
+        }
     }
 
-    #[cfg(not(target_os = "linux"))]
-    {
+    let (logical_w, logical_h) = logical_size(window);
     Rect {
         position: wry::dpi::LogicalPosition::new(0.0, chrome_h).into(),
         size: wry::dpi::Size::Logical(wry::dpi::LogicalSize::new(
@@ -1611,16 +1628,16 @@ fn content_bounds(logical_w: f64, logical_h: f64, chrome_h: f64) -> Rect {
             (logical_h - chrome_h).max(0.0),
         )),
     }
-    }
 }
 
 fn reflow_layout(window: &Window, state: &BrowserState) {
-    let (lw, lh) = logical_size(window);
     let chrome_h = chrome_height(state);
     #[cfg(target_os = "linux")]
     set_linux_chrome_container_height(&state.gtk_chrome_container, chrome_h);
-    let _ = state.chrome.set_bounds(chrome_bounds(lw, chrome_h));
-    let cb = content_bounds(lw, lh, chrome_h);
+    let _ = state
+        .chrome
+        .set_bounds(chrome_bounds(window, chrome_h, state.host_mode));
+    let cb = content_bounds(window, chrome_h, state.host_mode);
     for tab in &state.tabs {
         if let Some(webview) = tab.webview.as_ref() {
             let _ = webview.set_bounds(cb);
