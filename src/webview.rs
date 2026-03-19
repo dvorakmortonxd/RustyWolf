@@ -60,7 +60,9 @@ struct BrowserState {
     chrome: WebView,
     host_mode: WebViewHostMode,
     #[cfg(target_os = "linux")]
-    gtk_container: gtk::Fixed,
+    gtk_chrome_container: gtk::Fixed,
+    #[cfg(target_os = "linux")]
+    gtk_content_container: gtk::Fixed,
     tabs: Vec<Tab>,
     history: Vec<HistoryEntry>,
     downloads: Vec<DownloadEntry>,
@@ -727,14 +729,16 @@ pub fn launch_webkit(args: &Cli) -> Result<()> {
         .map_err(|err| anyhow!("Failed to create window: {err}"))?;
 
     #[cfg(target_os = "linux")]
-    let gtk_container = create_linux_webview_container(&window)?;
+    let (gtk_chrome_container, gtk_content_container) = create_linux_webview_containers(&window)?;
+    #[cfg(target_os = "linux")]
+    set_linux_chrome_container_height(&gtk_chrome_container, CHROME_HEIGHT_BASE);
 
     let (chrome, effective_host_mode) = build_chrome(
         &window,
         &proxy,
         host_mode,
         #[cfg(target_os = "linux")]
-        &gtk_container,
+        &gtk_chrome_container,
     )?;
     host_mode = effective_host_mode;
 
@@ -742,7 +746,9 @@ pub fn launch_webkit(args: &Cli) -> Result<()> {
         chrome,
         host_mode,
         #[cfg(target_os = "linux")]
-        gtk_container,
+        gtk_chrome_container,
+        #[cfg(target_os = "linux")]
+        gtk_content_container,
         tabs: Vec::new(),
         history: Vec::new(),
         downloads: Vec::new(),
@@ -1125,7 +1131,7 @@ fn build_chrome(
     window: &Window,
     proxy: &EventLoopProxy<UserEvent>,
     host_mode: WebViewHostMode,
-    #[cfg(target_os = "linux")] gtk_container: &gtk::Fixed,
+    #[cfg(target_os = "linux")] gtk_chrome_container: &gtk::Fixed,
 ) -> Result<(WebView, WebViewHostMode)> {
     let (lw, _lh) = logical_size(window);
     let builder = || {
@@ -1142,7 +1148,7 @@ fn build_chrome(
         WebViewHostMode::Window => {
             #[cfg(target_os = "linux")]
             {
-                match builder().build_gtk(gtk_container) {
+                match builder().build_gtk(gtk_chrome_container) {
                     Ok(webview) => return Ok((webview, WebViewHostMode::Window)),
                     Err(gtk_err) => {
                         return builder()
@@ -1175,7 +1181,7 @@ fn build_chrome(
                     );
                     #[cfg(target_os = "linux")]
                     {
-                        match builder().build_gtk(gtk_container) {
+                        match builder().build_gtk(gtk_chrome_container) {
                             Ok(webview) => return Ok((webview, WebViewHostMode::Window)),
                             Err(gtk_err) => {
                                 return builder()
@@ -1227,7 +1233,7 @@ fn build_tab_webview(
     window: &Window,
     proxy: &EventLoopProxy<UserEvent>,
     host_mode: WebViewHostMode,
-    #[cfg(target_os = "linux")] gtk_container: &gtk::Fixed,
+    #[cfg(target_os = "linux")] gtk_content_container: &gtk::Fixed,
     private: bool,
     tab_id: u32,
     url: &str,
@@ -1287,7 +1293,7 @@ fn build_tab_webview(
         WebViewHostMode::Window => {
             #[cfg(target_os = "linux")]
             {
-                match builder().build_gtk(gtk_container) {
+                match builder().build_gtk(gtk_content_container) {
                     Ok(webview) => return Ok((webview, WebViewHostMode::Window)),
                     Err(gtk_err) => {
                         return builder()
@@ -1320,7 +1326,7 @@ fn build_tab_webview(
                     );
                     #[cfg(target_os = "linux")]
                     {
-                        match builder().build_gtk(gtk_container) {
+                        match builder().build_gtk(gtk_content_container) {
                             Ok(webview) => return Ok((webview, WebViewHostMode::Window)),
                             Err(gtk_err) => {
                                 return builder()
@@ -1367,7 +1373,7 @@ fn open_tab(
         proxy,
         state.host_mode,
         #[cfg(target_os = "linux")]
-        &state.gtk_container,
+        &state.gtk_content_container,
         state.private,
         tab_id,
         &url,
@@ -1460,7 +1466,7 @@ fn ensure_tab_loaded(
         proxy,
         state.host_mode,
         #[cfg(target_os = "linux")]
-        &state.gtk_container,
+        &state.gtk_content_container,
         state.private,
         tab_id,
         &tab_url,
@@ -1585,6 +1591,19 @@ fn chrome_bounds(logical_w: f64, chrome_h: f64) -> Rect {
 }
 
 fn content_bounds(logical_w: f64, logical_h: f64, chrome_h: f64) -> Rect {
+    #[cfg(target_os = "linux")]
+    {
+        return Rect {
+            position: wry::dpi::LogicalPosition::new(0.0, 0.0).into(),
+            size: wry::dpi::Size::Logical(wry::dpi::LogicalSize::new(
+                logical_w,
+                (logical_h - chrome_h).max(0.0),
+            )),
+        };
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    {
     Rect {
         position: wry::dpi::LogicalPosition::new(0.0, chrome_h).into(),
         size: wry::dpi::Size::Logical(wry::dpi::LogicalSize::new(
@@ -1592,11 +1611,14 @@ fn content_bounds(logical_w: f64, logical_h: f64, chrome_h: f64) -> Rect {
             (logical_h - chrome_h).max(0.0),
         )),
     }
+    }
 }
 
 fn reflow_layout(window: &Window, state: &BrowserState) {
     let (lw, lh) = logical_size(window);
     let chrome_h = chrome_height(state);
+    #[cfg(target_os = "linux")]
+    set_linux_chrome_container_height(&state.gtk_chrome_container, chrome_h);
     let _ = state.chrome.set_bounds(chrome_bounds(lw, chrome_h));
     let cb = content_bounds(lw, lh, chrome_h);
     for tab in &state.tabs {
@@ -1607,16 +1629,32 @@ fn reflow_layout(window: &Window, state: &BrowserState) {
 }
 
 #[cfg(target_os = "linux")]
-fn create_linux_webview_container(window: &Window) -> Result<gtk::Fixed> {
+fn create_linux_webview_containers(window: &Window) -> Result<(gtk::Fixed, gtk::Fixed)> {
     let vbox = window.default_vbox().ok_or_else(|| {
         anyhow!("Failed to access default GTK vbox required for Linux webview hosting")
     })?;
-    let fixed = gtk::Fixed::new();
-    fixed.set_hexpand(true);
-    fixed.set_vexpand(true);
-    vbox.pack_start(&fixed, true, true, 0);
-    fixed.show_all();
-    Ok(fixed)
+
+    let chrome = gtk::Fixed::new();
+    chrome.set_hexpand(true);
+    chrome.set_vexpand(false);
+
+    let content = gtk::Fixed::new();
+    content.set_hexpand(true);
+    content.set_vexpand(true);
+
+    vbox.pack_start(&chrome, false, false, 0);
+    vbox.pack_start(&content, true, true, 0);
+
+    chrome.show_all();
+    content.show_all();
+    vbox.show_all();
+
+    Ok((chrome, content))
+}
+
+#[cfg(target_os = "linux")]
+fn set_linux_chrome_container_height(container: &gtk::Fixed, chrome_h: f64) {
+    container.set_size_request(-1, chrome_h.max(0.0).round() as i32);
 }
 
 fn load_window_icon() -> Option<Icon> {
