@@ -31,6 +31,7 @@ const CHROME_HEIGHT_POPUP_PROMPT_EXTRA: f64 = 44.0;
 const MAX_HISTORY_ENTRIES: usize = 250;
 const MAX_DOWNLOAD_ENTRIES: usize = 200;
 const PROPERTIES_MAX_ROWS: usize = 120;
+const MAX_TAB_NAV_ENTRIES: usize = 100;
 
 // ---------- Event types -----------------------------------------------
 
@@ -55,6 +56,9 @@ struct Tab {
     url: String,
     kir_enabled: bool,
     webview: Option<WebView>,
+    back_stack: Vec<String>,
+    forward_stack: Vec<String>,
+    pending_nav_from_stack: bool,
 }
 
 struct BrowserState {
@@ -929,7 +933,22 @@ fn handle_event(
         UserEvent::PageLoaded { tab_id, url } => {
             if let Some(i) = state.find_index(tab_id) {
                 if !url.is_empty() && url != "about:blank" {
-                    state.tabs[i].url = url;
+                    let previous = state.tabs[i].url.clone();
+                    if url != previous {
+                        if state.tabs[i].pending_nav_from_stack {
+                            state.tabs[i].pending_nav_from_stack = false;
+                        } else if !previous.is_empty()
+                            && previous != "about:blank"
+                            && !is_internal_page(&previous)
+                        {
+                            state.tabs[i].back_stack.push(previous);
+                            trim_tab_nav_stack(&mut state.tabs[i].back_stack);
+                            state.tabs[i].forward_stack.clear();
+                        }
+                        state.tabs[i].url = url;
+                    } else {
+                        state.tabs[i].pending_nav_from_stack = false;
+                    }
                     if !is_internal_page(&state.tabs[i].url) {
                         append_history(
                             state,
@@ -1058,6 +1077,12 @@ fn handle_chrome_ipc(
         ensure_active_tab_loaded(state, window, proxy)?;
         if let Some(tab) = active_tab_mut(state) {
             let next = normalize_url(raw_url);
+            if next != tab.url && !tab.url.is_empty() && tab.url != "about:blank" {
+                tab.back_stack.push(tab.url.clone());
+                trim_tab_nav_stack(&mut tab.back_stack);
+                tab.forward_stack.clear();
+            }
+            tab.pending_nav_from_stack = false;
             tab.url = next.clone();
             tab.title = "Loading…".to_string();
             if let Some(webview) = tab.webview.as_ref() {
@@ -1069,12 +1094,46 @@ fn handle_chrome_ipc(
     }
 
     if message == "back" {
-        run_script_on_active_tab(state, "history.back();");
+        ensure_active_tab_loaded(state, window, proxy)?;
+        if let Some(tab) = active_tab_mut(state) {
+            if let Some(target) = tab.back_stack.pop() {
+                if !tab.url.is_empty() && tab.url != "about:blank" {
+                    tab.forward_stack.push(tab.url.clone());
+                    trim_tab_nav_stack(&mut tab.forward_stack);
+                }
+                tab.pending_nav_from_stack = true;
+                tab.url = target.clone();
+                tab.title = "Loading…".to_string();
+                if let Some(webview) = tab.webview.as_ref() {
+                    let _ = webview.load_url(&target);
+                }
+                push_tabs(state);
+            } else {
+                run_script_on_active_tab(state, "history.back();");
+            }
+        }
         return Ok(());
     }
 
     if message == "forward" {
-        run_script_on_active_tab(state, "history.forward();");
+        ensure_active_tab_loaded(state, window, proxy)?;
+        if let Some(tab) = active_tab_mut(state) {
+            if let Some(target) = tab.forward_stack.pop() {
+                if !tab.url.is_empty() && tab.url != "about:blank" {
+                    tab.back_stack.push(tab.url.clone());
+                    trim_tab_nav_stack(&mut tab.back_stack);
+                }
+                tab.pending_nav_from_stack = true;
+                tab.url = target.clone();
+                tab.title = "Loading…".to_string();
+                if let Some(webview) = tab.webview.as_ref() {
+                    let _ = webview.load_url(&target);
+                }
+                push_tabs(state);
+            } else {
+                run_script_on_active_tab(state, "history.forward();");
+            }
+        }
         return Ok(());
     }
 
@@ -1449,8 +1508,19 @@ fn build_tab_webview(
 }
 
 fn browser_user_agent() -> String {
-    // Keep a modern compatibility UA while clearly identifying this browser.
-    format!("{MODERN_BROWSER_UA_BASE} RustyWolf/{}", env!("CARGO_PKG_VERSION"))
+    let platform = if cfg!(target_os = "macos") {
+        "Macintosh; Intel Mac OS X 14_0"
+    } else if cfg!(target_os = "windows") {
+        "Windows NT 10.0; Win64; x64"
+    } else {
+        "X11; Linux x86_64"
+    };
+
+    // Keep broad compatibility while explicitly identifying RustyWolf.
+    format!(
+        "Mozilla/5.0 ({platform}; rv:128.0) {MODERN_BROWSER_UA_BASE} RustyWolf/{}",
+        env!("CARGO_PKG_VERSION")
+    )
 }
 
 fn open_tab(
@@ -1481,6 +1551,9 @@ fn open_tab(
         url,
         kir_enabled: false,
         webview: Some(webview),
+        back_stack: Vec::new(),
+        forward_stack: Vec::new(),
+        pending_nav_from_stack: false,
     });
     state.active = state.tabs.len() - 1;
 
@@ -1928,6 +2001,13 @@ fn trim_downloads(state: &mut BrowserState) {
     if state.downloads.len() > MAX_DOWNLOAD_ENTRIES {
         let remove_count = state.downloads.len() - MAX_DOWNLOAD_ENTRIES;
         state.downloads.drain(0..remove_count);
+    }
+}
+
+fn trim_tab_nav_stack(stack: &mut Vec<String>) {
+    if stack.len() > MAX_TAB_NAV_ENTRIES {
+        let remove_count = stack.len() - MAX_TAB_NAV_ENTRIES;
+        stack.drain(0..remove_count);
     }
 }
 
